@@ -377,6 +377,7 @@ func ociBlob(bctx rego.BuiltinContext, a *ast.Term) (*ast.Term, error) {
 
 func ociDescriptor(bctx rego.BuiltinContext, a *ast.Term) (*ast.Term, error) {
 	logger := log.WithField("function", ociDescriptorName)
+	var ref name.Reference
 
 	uriValue, ok := a.Value.(ast.String)
 	if !ok {
@@ -395,14 +396,27 @@ func ociDescriptor(bctx rego.BuiltinContext, a *ast.Term) (*ast.Term, error) {
 	}
 	logger = logger.WithField("ref", uri)
 
-	ref, err := name.NewDigest(uri)
-	if err != nil {
-		logger.WithFields(log.Fields{
-			"action": "new digest",
-			"error":  err,
-		}).Error("failed to create new digest")
-		return nil, nil
-	}
+	// A digest-based Image ref typically contains "@sha256:"
+    // A tag-based Image ref typically contains ":" for the tag, but not "@sha256:"
+    if strings.Contains(uri, "@sha256:") {
+        ref, err = name.NewDigest(uri)
+        if err != nil {
+            logger.WithFields(log.Fields{
+                "action":  "new digest",
+                "error":   err,
+            }).Error("failed to create new digest reference")
+            return nil, nil
+        }
+    } else {
+        ref, err = name.NewTag(uri)
+        if err != nil {
+            logger.WithFields(log.Fields{
+                "action":  "name tag",
+                "error":   err,
+            }).Error("failed to create new tag reference")
+            return nil, nil
+        }
+    }
 
 	descriptor, err := client.Head(ref)
 	if err != nil {
