@@ -21,16 +21,8 @@
 # For POC testing: use with --ignore-rekor and certificate-* flags to bypass signature validation
 #
 description: 'POC policy for validating Tekton task bundle images'
+publicKey: 'k8s://openshift-pipelines/public-key'
 sources:
   - name: Task Bundle Policies
     policy:
-      # Reference the task bundle validation policies in this directory (local path for testing)
       - ./policies/task-bundle
-    config:
-      include:
-        - task_bundle_detector
-        - task_extractor
-        - task_validation
-      exclude:
-        - builtin.attestation
-        - builtin.image
