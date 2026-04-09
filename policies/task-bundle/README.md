@@ -1,123 +1,97 @@
 # Tekton Task Bundle Validation POC
 
-This directory contains Rego policies for validating Tekton task bundles as OCI artifacts.
+This directory contains a Rego policy for validating Tekton task bundles as OCI artifacts.
 
 ## Overview
 
-This POC demonstrates running existing task policy checks against Tekton task bundles when executing `ec validate image`. The policies detect task bundles, extract task definitions, and validate them.
+This POC demonstrates running task policy checks against Tekton task bundles via `ec validate image`. The policy detects task bundles, extracts task definitions from bundle layers, and validates them -- all in Rego using existing `ec.oci.*` built-ins, with no Go code changes.
 
-## Components
+## Architecture
 
-### 1. `task_bundle_detector.rego`
-Detects if an image is a Tekton task bundle by checking for `dev.tekton.image.*` annotations on OCI manifest layers.
+Everything lives in a single file: `task_bundle.rego` (package `task_bundle`).
 
-**Key functions:**
-- `is_task_bundle` - Returns true if image is a task bundle
-- `bundle_info` - Returns metadata about the bundle (resource count, kinds, names)
+### Detection
+Checks OCI manifest layers for `dev.tekton.image.*` annotations to identify task bundles.
 
-### 2. `task_extractor.rego`
-Extracts task definitions from task bundle layers using EC's OCI built-ins.
+### Extraction
+Iterates layers where `dev.tekton.image.kind == "task"`, builds blob references (`repo@digest`), and uses `ec.oci.blob_files()` to pull task definitions from each layer's tar archive. Results are collected in `_task_definitions`.
 
-**Key functions:**
-- `task_definitions` - Returns array of parsed task objects
-- Uses `ec.oci.blob_files()` to extract YAML from bundle layers
+### Validation Rules
+| Rule | Type | Description |
+|------|------|-------------|
+| `detected` | warn | Reports task bundle detection and task count |
+| `no_tasks` | deny | Bundle detected but no tasks could be extracted |
+| `kind` | deny | Task `kind` must be `"Task"` |
+| `name_required` | deny | Task must have `metadata.name` |
+| `has_steps` | deny | Task must have at least one step |
+| `step_image` | deny | Each step must have an `image` (unless using a StepAction `ref`) |
 
-### 3. `task_validation.rego`
-Validates extracted task definitions against Tekton task schema.
-
-**Current validations:**
-- `kind` field is "Task"
-- Required fields: `apiVersion`, `metadata.name`, `spec`
-- Task has at least one step
-- Each step has `name` and `image`
+All helper rules use `_` prefix (private) to avoid being processed by EC's rule inspector.
 
 ## Usage
 
-### Using the ECP config
-
 ```bash
+# Validate a task bundle image
 ec validate image \
-  --image <task-bundle-image-ref> \
-  --policy policies/task-bundle/policy.yaml
+  --image quay.io/conforma/tekton-task:latest \
+  --policy policies/task-bundle/policy.yaml \
+  --ignore-rekor \
+  --output text
 ```
 
-### Using in a snapshot
+For images without signatures, add certificate flags as needed:
+```bash
+ec validate image \
+  --image <task-bundle-ref> \
+  --policy policies/task-bundle/policy.yaml \
+  --ignore-rekor \
+  --certificate-identity-regexp '.*' \
+  --certificate-oidc-issuer-regexp '.*' \
+  --output text
+```
 
-Create a snapshot with a task bundle component:
+## ECP Configuration
+
+`policy.yaml` defines the EnterpriseContractPolicy:
 
 ```yaml
-apiVersion: appstudio.redhat.com/v1alpha1
-kind: ApplicationSnapshot
-spec:
-  components:
-    - name: my-task-bundle
-      containerImage: quay.io/my-org/my-task-bundle:v1.0
+description: 'POC policy for validating Tekton task bundle images'
+publicKey: 'k8s://openshift-pipelines/public-key'
+sources:
+  - name: Task Bundle Policies
+    policy:
+      - ./policies/task-bundle
 ```
 
-Then validate:
+## Key Design Decisions
 
-```bash
-ec validate image \
-  --snapshot snapshot.yaml \
-  --policy policies/task-bundle/policy.yaml
-```
-
-## How it Works
-
-1. **Detection**: For each component image, `task_bundle_detector` checks the OCI manifest for Tekton annotations
-2. **Extraction**: If it's a task bundle, `task_extractor` fetches blob content and extracts task YAML
-3. **Validation**: `task_validation` runs checks on extracted task definitions
-4. **Results**: Violations, warnings, and successes are reported per-component
-
-## Rego-Heavy Approach
-
-This POC uses a **Rego-heavy architecture**:
-- **No Go code changes** required for detection or extraction
-- **OCI operations** handled by existing `ec.oci.*` built-ins:
-  - `ec.oci.image_manifest()` - Get manifest with layer annotations  
-  - `ec.oci.blob_files()` - Extract YAML/JSON from blob tar archives
-  - `ec.oci.blob()` - Get raw blob content
-- **Policy-driven** - All logic in Rego, easy to extend/modify
+- **Single package**: All detection, extraction, and validation in one package avoids EC rule inspector issues with cross-package boolean helpers.
+- **Private helpers**: `_` prefix keeps internal rules out of EC's rule inspection (`checkRules` only processes `warn`/`deny` + annotated rules).
+- **No package-level METADATA**: Avoids helper rules being treated as "interesting" by the inspector.
+- **StepAction awareness**: Steps using a `ref` (StepAction reference) are not flagged for missing `image`.
 
 ## Extending
 
-To add more task validations:
-
-1. Create new Rego files in this directory
-2. Import `data.task_extractor` to access `task_definitions`
-3. Write `deny` rules that validate each task
-4. Update `policy.yaml` to include new modules
-
-Example:
+Add new `deny`/`warn` rules in `task_bundle.rego` that iterate over `_task_definitions`:
 
 ```rego
-package task_advanced_validation
-
-import rego.v1
-import data.task_extractor
-
+# METADATA
+# title: My new check
+# custom:
+#   short_name: my_check
 deny contains result if {
-    some task in task_extractor.task_definitions
-    # Your validation logic here
-    result := {"code": "...", "msg": "..."}
+    some task in _task_definitions
+    # your validation logic
+    result := {
+        "code": "task_bundle.my_check",
+        "msg": "...",
+    }
 }
 ```
 
-## Testing
+## Future Work
 
-To test with a real task bundle:
-
-```bash
-# Example with a Konflux task bundle
-ec validate image \
-  --image quay.io/konflux-ci/tekton-catalog/task-buildah:0.1 \
-  --policy policies/task-bundle/policy.yaml
-```
-
-## Future Enhancements
-
-- Import and adapt policies from `github.com/conforma/policy/tree/main/policy/task`
+- Explore reusing existing conforma/policy task policies via Rego `with` keyword
 - Add step image registry validation
 - Add trusted artifacts pattern validation
-- Add annotation format validation
 - Support for rule data configuration

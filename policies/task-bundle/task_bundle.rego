@@ -138,6 +138,7 @@ deny contains result if {
 	task.spec.steps
 	some i, step in task.spec.steps
 	not step.image
+	not step.ref # Steps using a StepAction ref don't need an image
 	result := {
 		"code": "task_bundle.step_image",
 		"msg": sprintf("Task %s step[%d] '%s' is missing image", [_task_name(task), i, object.get(step, "name", "<unnamed>")]),
