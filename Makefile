@@ -207,10 +207,10 @@ generate-baseline: benchmark/stress/data.tar.gz ## Generate stress benchmark bas
 	line = [l for l in open('benchmark-output.txt') if l.startswith('BenchmarkStress')]; \
 	line or sys.exit('No BenchmarkStress results found'); \
 	line = line[0]; \
-	def val(p): \
-	    m = re.search(p, line); \
-	    return m.group(1) if m else ''; \
-	ns = val(r'([\d.]+)\s+ns/op'); rss = val(r'([\d.]+)\s+peak-RSS-bytes'); \
+	ns_m = re.search(r'([\d.]+)\s+ns/op', line); \
+	rss_m = re.search(r'([\d.]+)\s+peak-RSS-bytes', line); \
+	ns = ns_m.group(1) if ns_m else ''; \
+	rss = rss_m.group(1) if rss_m else ''; \
 	(ns and rss) or sys.exit('Failed to parse benchmark metrics'); \
 	json.dump({'peak_rss_bytes': int(float(rss)), 'ns_per_op': int(float(ns)), \
 	  'components': int('$${EC_STRESS_COMPONENTS:-10}'), 'workers': int('$${EC_STRESS_WORKERS:-10}'), \

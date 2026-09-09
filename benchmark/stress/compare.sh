@@ -37,13 +37,13 @@ if [[ ! -f "$THRESHOLDS" ]]; then
 fi
 
 if [[ ! -f "$BENCHMARK_OUTPUT" ]]; then
-    echo "No benchmark output found at ${BENCHMARK_OUTPUT}"
+    echo "No benchmark output found at ${BENCHMARK_OUTPUT}" >&2
     exit 1
 fi
 
 line=$(grep '^BenchmarkStress' "$BENCHMARK_OUTPUT" || true)
 if [[ -z "$line" ]]; then
-    echo "No BenchmarkStress results found in output."
+    echo "No BenchmarkStress results found in output." >&2
     exit 1
 fi
 
@@ -66,7 +66,7 @@ print(ns, rss, b['ns_per_op'], b['peak_rss_bytes'], t['peak_rss_percent'], t['ns
 )
 
 if awk -v rss="$baseline_rss" -v ns="$baseline_ns" 'BEGIN {exit !(rss==0 || ns==0)}'; then
-    echo "Baseline contains zero values, cannot compute regression."
+    echo "Baseline contains zero values, cannot compute regression." >&2
     exit 1
 fi
 
